@@ -1,0 +1,343 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
+
+```{r}
+library(igraph)
+library(tidyverse)
+
+```
+
+
+```{r}
+#weights<-read.csv('df_li.csv')
+weights <- read.csv('df_li_no_self_connections.csv')
+weights<- weights %>% remove_rownames %>% column_to_rownames(var="X")
+weights_matrix <- data.matrix(weights)
+```
+
+Starting graph
+```{r}
+g2 <- graph_from_adjacency_matrix(mode="undirected", weights_matrix, weighted=TRUE)
+plot(g2)
+```
+
+Constants that we might change
+```{r}
+PROP_STEPS = 2;
+threshold = .2;
+
+base_list = c('basement', 'wideness', 'blue', 'sigh', 'peaceful', 'cradle', 'staircase', 'blossom', 'jungle', 'river', 'ocean', 'bird', 'arrival', 'celebration', 'devotion', 'circle', 'departure', 'fight', 'quarrel', 'toxin', 'mischief', 'mockery', 'red', 'rushed', 'hero','strength', 'narrowness', 'needle')
+
+terms = data_frame(red=0, blue=0, devotion=0, arrival=0, departure=0, bird=0, quarrel=0, strength=0, ocean=0, needle=0, mischief=0, mockery=0, blossom=0, basement=0, narrowness=0, wideness=0, peaceful=0, staircase=0, fight=0, jungle=0, river=0, toxin=0, rushed=0, celebration=0, circle=0, cradle=0, hero=0, sigh=0)
+terms_matrix <- data.matrix(terms)
+
+```
+
+```{r}
+music_feature_codes = read.csv('df_music.csv')
+music_feature_codes_fix <- music_feature_codes[,-1]
+rownames(music_feature_codes_fix) <- music_feature_codes[,1]
+music_feature_codes_fix <- data.matrix(music_feature_codes_fix)
+
+music_values = data_frame(dissonant=0, consonant=0, fast=1, slow=0, low=0, high=0)
+music_matrix <- data.matrix(music_values)
+
+music_survey = read.csv('musicsurvey_copy.csv')
+```
+
+Activation function
+```{r}
+activation_function = function(x) {
+  if (x < threshold) {
+    return(0);
+  }
+  else {
+    return(x)
+  }
+}
+
+activation_function_music = function(x, summ){
+    #print(paste("Current act", toString(x)))
+    #print(as.numeric(x/summ))
+    return((x/summ)*10);
+}
+
+
+```
+
+Starting the model when we assume the correct thing is primed
+```{r}
+start_simple_model = function(start) {
+  new_activations = replicate(1, terms_matrix)
+  
+  index = which(colnames(terms_matrix) == start)
+  
+  new_activations[index] = 1;
+  
+  return(new_activations)
+}
+
+```
+
+More Complicated Model (make sure works)
+```{r}
+
+divide_activation_music_features = function(word) {
+  mus = subset(music_survey, Clip.name==word)
+  mus = mus[2:7]
+  
+  return(mus)
+  
+}
+
+divide_activation = function(word) {
+  music_features_terms = divide_activation_music_features(word)
+  
+  start_matrix = data.frame(propagate_music_start(music_features_terms))
+  
+  return(start_matrix)
+  
+}
+
+calculate_prop_word_music = function(word, music) {
+  total = 0;
+  for (j in 1:ncol(music)) {
+    weight = music_feature_codes_fix[j, word];
+    v = music[j]
+    total = total + v*weight;
+  }
+  
+  if (total > 1) {
+    total = 1
+  }
+  return(total);
+}
+
+propagate_music_start = function(music) {
+  new_activations = replicate(1, terms_matrix)
+  
+  for (i in 1:ncol(terms)) {
+    value = calculate_prop_word_music(colnames(terms)[i], music)
+    value = activation_function(value)
+    terms[i] = value;
+  }
+  return(terms)
+}
+
+
+start_music_model = function(word) {
+  starting_values = divide_activation(word)
+  return(starting_values)
+}
+
+
+```
+
+End decision
+```{r}
+
+apply_criteria_simple = function(value) {
+  if (value > .5) {
+    return(TRUE)
+  }
+  else {
+    return(FALSE)
+  }
+}
+
+check_primes_simple = function(terms, list) {
+  answer = c();
+  word_count = 0;
+  
+  ordered = order(terms, na.last=TRUE, decreasing=TRUE)
+  
+  for (j in 1:length(ordered)) {
+    i = ordered[j]
+    value = terms[i]
+    if (apply_criteria_simple(value) && word_count < 3) {
+      term = colnames(terms)[i]
+      if (term %in% list) {
+        answer = c(answer, term)
+        word_count = word_count + 1;
+      }
+    }
+  }
+  
+  return(answer);
+}
+
+apply_criteria_music = function(value) {
+  #replace later with better criteria
+  if (value > .4) {
+    return(TRUE)
+  }
+  else {
+    return(FALSE)
+  }
+}
+
+check_primes_music = function(terms, list) {
+  answer = c();
+  word_count = 0;
+  
+  ordered = order(terms, na.last=TRUE, decreasing=TRUE)
+  
+  for (j in 1:length(ordered)) {
+    i = ordered[j]
+    value = terms[i]
+    if (apply_criteria_music(value) && word_count < 3) {
+      term = colnames(terms)[i]
+      if (term %in% list) {
+        answer = c(answer, term)
+        word_count = word_count + 1;
+      }
+    }
+  }
+  
+  return(answer);
+}
+```
+
+
+Propagation
+MAKE SURE WORKS
+```{r}
+calculate_prop = function(name, terms) {
+  total = 0;
+  for (j in 1:ncol(terms)) {
+    weight = weights_matrix[name, j];
+    v = terms[j]
+    total = total + v*weight;
+  }
+  
+  if (total > 1) {
+    total = 1
+  }
+  
+  return(total);
+}
+
+
+propagate = function(terms) {
+  next_set = terms
+  
+  for (i in 1:ncol(terms)) {
+    value = calculate_prop(colnames(terms)[i], terms)
+    value = activation_function(value)
+    next_set[i] = value;
+  }
+  
+  return(next_set)
+}
+
+calculate_prop_music = function(name, terms) {
+  total = 0;
+  for (j in 1:ncol(terms)) {
+    weight = weights_matrix[name, j];
+    v = terms[j]
+    #print(paste(toString(weight), "*", toString(v), "=", toString((weight*v))))
+    total = total + v*weight;
+  }
+  #print(paste("total:", toString(total)))
+  
+  return(total);
+}
+
+propagate_music = function(terms) {
+  next_set = terms
+  normalize_sum = 0;
+  
+  for (i in 1:ncol(terms)) {
+    value = calculate_prop_music(colnames(terms)[i], terms)
+    #print(as.numeric(value))
+    next_set[i] = value;
+    n = as.numeric(value)
+    normalize_sum = normalize_sum + n;
+  }
+
+
+  
+  for (i in 1:ncol(terms)) {
+    value = next_set[i]
+    act_value = activation_function_music(value, normalize_sum)
+    next_set[i] = act_value;
+  }
+
+  
+  return(next_set)
+}
+
+```
+
+Generate cases
+```{r}
+generate_list = function() {
+  return(sample(base_list, 15))
+}
+
+```
+
+Generate graph
+```{r}
+generate_graph = function(terms) {
+  V(g2)$size <- as.numeric(terms*20)
+  plot(g2)
+}
+```
+
+Actual overlooking function for the simple one
+```{r}
+
+run = function(word, choices) {
+  activation_vector = start_simple_model(word);
+  
+  for (i in 1:PROP_STEPS) {
+    activation_vector = propagate(activation_vector)
+    #print(paste("Step ", toString(i)))
+    #print(activation_vector)
+  }
+  
+  generate_graph(activation_vector)
+  #print(activation_vector)
+  
+  final_choices = check_primes_simple(activation_vector, choices)
+  return(final_choices)
+}
+
+```
+
+Test Simple
+```{r}
+choices = generate_list()
+print(choices)
+run("hero", choices)
+
+```
+
+More Complicated Model
+```{r}
+run2 = function(word, choices) {
+  activation_vector = start_music_model(word);
+  for (i in 1:PROP_STEPS) {
+    activation_vector = propagate_music(activation_vector)
+  }
+  generate_graph(activation_vector)
+  print(activation_vector)
+  
+  final_choices = check_primes_music(activation_vector, choices)
+  return(final_choices)
+}
+```
+
+Test w/ Music
+```{r}
+choices = generate_list()
+print(choices)
+run2("red", choices)
+```
